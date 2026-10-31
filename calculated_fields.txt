@@ -1,0 +1,96 @@
+PARAMETERS
+- Recency Step (days) | integer | default 90 | range 30-180 step 15
+- Frequency Step (orders) | integer | default 2 | range 1-5 step 1
+- Monetary Step ($) | integer | default 300 | range 100-1000 step 50
+- High Value CLV Threshold ($) | integer | default 1000 | range 500-5000 step 100
+- Churn Window (days) | integer | default 180 | range 60-365 step 30
+- Expected Lifespan (years) | real | default 3.0 | range 1-10 step 0.5
+
+CALCULATED FIELDS (create in this order)
+
+// Snapshot Date
+{ FIXED : MAX([Order Date]) }
+
+// Customer First Order
+{ FIXED [Customer ID] : MIN([Order Date]) }
+
+// Customer Last Order
+{ FIXED [Customer ID] : MAX([Order Date]) }
+
+// Recency (days)
+DATEDIFF('day',[Customer Last Order],[Snapshot Date])
+
+// Frequency (orders)
+{ FIXED [Customer ID] : COUNTD([Order ID]) }
+
+// Monetary (sales)
+{ FIXED [Customer ID] : SUM([Sales]) }
+
+// Customer Profit
+{ FIXED [Customer ID] : SUM([Profit]) }
+
+// R Score
+MAX(1,6-CEILING(MAX(1,[Recency (days)])/[Recency Step (days)]))
+
+// F Score
+MIN(5,CEILING([Frequency (orders)]/[Frequency Step (orders)]))
+
+// M Score
+MIN(5,CEILING([Monetary (sales)]/[Monetary Step ($)]))
+
+// RFM Score
+[R Score]+[F Score]+[M Score]
+
+// RFM Code
+STR([R Score])+STR([F Score])+STR([M Score])
+
+// RFM Segment
+IF [R Score]>=4 AND [F Score]>=4 AND [M Score]>=4 THEN "Champions"
+ELSEIF [R Score]>=3 AND [F Score]>=3 THEN "Loyal Customers"
+ELSEIF [R Score]>=4 AND [F Score]<=2 THEN "New / Promising"
+ELSEIF [R Score]<=2 AND [F Score]>=3 AND [M Score]>=3 THEN "At Risk - High Value"
+ELSEIF [R Score]<=2 AND [F Score]>=3 THEN "At Risk"
+ELSEIF [R Score]<=2 THEN "Hibernating / Lost"
+ELSE "Needs Attention" END
+
+// Tenure (years)
+MAX(DATEDIFF('day',[Customer First Order],[Snapshot Date])/365.0, 1.0/12)
+
+// Avg Order Value
+[Monetary (sales)]/[Frequency (orders)]
+
+// Orders per Year
+[Frequency (orders)]/[Tenure (years)]
+
+// Margin %
+IF [Monetary (sales)]>0 THEN [Customer Profit]/[Monetary (sales)] ELSE 0 END
+
+// Historic CLV
+[Customer Profit]
+
+// Predicted CLV
+[Avg Order Value]*[Orders per Year]*[Margin %]*[Expected Lifespan (years)]*IF [Is Churned] THEN 0.25 ELSE 1 END
+
+// Total CLV
+[Historic CLV]+[Predicted CLV]
+
+// Is Churned
+[Recency (days)]>[Churn Window (days)]
+
+// Is High Value
+[Total CLV]>=[High Value CLV Threshold ($)]
+
+// Value Tier
+IF [Is High Value] THEN "High Value" ELSE "Standard" END
+
+// Customer Count
+COUNTD([Customer ID])
+
+// Churn Rate (customers)
+COUNTD(IF [Is Churned] THEN [Customer ID] END)/COUNTD([Customer ID])
+
+// Avg CLV per Customer (INCLUDE)
+AVG({ INCLUDE [Customer ID] : MAX([Total CLV]) })
+
+// Avg Sales per Customer (INCLUDE)
+AVG({ INCLUDE [Customer ID] : SUM([Sales]) })
